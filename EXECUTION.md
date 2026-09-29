@@ -4,6 +4,12 @@ Updated September 29, 2026.
 
 **Stage: documentation-only; no collection or job-search automation is running.**
 
+## Manager handoff
+
+Use [HYPERSCALE_EXECUTION.md](HYPERSCALE_EXECUTION.md) as the implementation brief: W1 offline job-record pipeline, W2 permitted-source adapter with mocked network tests, W3 private-consumer contract and measurement. Coordinate at most two active implementation workers total across this repo and video-analysis, one per repo. Start coding on owner delegation; do not substitute more planning-only documents or infer permission for unattended spending.
+
+This branch adds a documentation brief only. No manager/agent was assigned, no application code was implemented and no collection workflow was enabled. Update this execution page with actual implementation evidence when work begins.
+
 ## Repository setup
 
 - [x] Define public reusable scope and private-data boundary.
