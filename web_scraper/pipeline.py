@@ -53,7 +53,11 @@ def _text(value, max_length):
 
 def _nested_text(field, value):
     if field == "location" and isinstance(value, list):
-        return ", ".join(str(_nested_text(field, item)) for item in value if item)
+        return ", ".join(
+            str(normalized)
+            for item in value
+            if (normalized := _nested_text(field, item))
+        )
     if not isinstance(value, dict):
         return value
     if field == "identifier":
@@ -84,17 +88,20 @@ def canonicalize_url(value):
         if parts.username is not None or parts.password is not None:
             return None
         hostname = parts.hostname.encode("idna").decode("ascii").lower()
+        host_for_netloc = f"[{hostname}]" if ":" in hostname else hostname
         port = parts.port
-        netloc = hostname if port is None else f"{hostname}:{port}"
+        netloc = host_for_netloc if port is None else f"{host_for_netloc}:{port}"
         if (parts.scheme.lower(), port) in {("http", 80), ("https", 443)}:
-            netloc = hostname
+            netloc = host_for_netloc
         path = parts.path or "/"
         if path != "/":
             path = path.rstrip("/")
         query = urlencode(
             sorted(
                 (key, val)
-                for key, val in parse_qsl(parts.query, keep_blank_values=True)
+                for key, val in parse_qsl(
+                    parts.query, keep_blank_values=True, max_num_fields=100
+                )
                 if key.lower() not in TRACKING_PARAMETERS
                 and not key.lower().startswith("utm_")
             )
@@ -170,6 +177,8 @@ class _OfflineHTMLParser(HTMLParser):
                 self.embedded.extend(_records_from_json(json.loads(embedded)))
             except (json.JSONDecodeError, ListingError, RecursionError):
                 raise ListingError("malformed JSON in HTML data-job/data-listing attribute")
+            if len(self.embedded) > MAX_RECORDS:
+                raise ListingError(f"input exceeds the {MAX_RECORDS}-record batch limit")
 
     def handle_endtag(self, tag):
         if tag.lower() == "script" and self._script_parts is not None:
@@ -193,7 +202,10 @@ def _job_postings(value):
         types = value.get("@type", [])
         if isinstance(types, str):
             types = [types]
-        if any(item.rsplit("/", 1)[-1] == "JobPosting" for item in types):
+        if any(
+            isinstance(item, str) and item.rsplit("/", 1)[-1] == "JobPosting"
+            for item in types
+        ):
             yield value
         graph = value.get("@graph")
         if graph is not None:
@@ -206,6 +218,8 @@ def parse_html(text, source="unknown"):
     try:
         parser.feed(text)
         parser.close()
+        if parser._script_parts is not None:
+            raise ListingError("unterminated JSON-LD script")
     except ListingError:
         raise
     except Exception as exc:
@@ -213,16 +227,21 @@ def parse_html(text, source="unknown"):
 
     records = list(parser.embedded)
     for document in parser.jsonld:
-        records.extend(_job_postings(document))
-    if len(records) > MAX_RECORDS:
-        raise ListingError(f"input exceeds the {MAX_RECORDS}-record batch limit")
+        for record in _job_postings(document):
+            records.append(record)
+            if len(records) > MAX_RECORDS:
+                raise ListingError(f"input exceeds the {MAX_RECORDS}-record batch limit")
     return [normalize_record(item, source=source) for item in records]
 
 
 def _check_text_size(text):
     if not isinstance(text, str):
         raise ListingError("input must be UTF-8 text")
-    if len(text.encode("utf-8")) > MAX_INPUT_BYTES:
+    try:
+        size = len(text.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise ListingError("input must be UTF-8 text") from exc
+    if size > MAX_INPUT_BYTES:
         raise ListingError(f"input exceeds the {MAX_INPUT_BYTES}-byte limit")
 
 
@@ -252,7 +271,8 @@ def _values(value):
 
 
 def apply_filters(records, filters=None):
-    filters = filters or {}
+    if filters is None:
+        filters = {}
     allowed = {"include", "contains", "exclude_contains", "require"}
     if not isinstance(filters, dict) or set(filters) - allowed:
         raise ListingError(f"filters must contain only: {', '.join(sorted(allowed))}")

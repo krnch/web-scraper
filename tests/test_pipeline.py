@@ -88,6 +88,16 @@ class PipelineTests(unittest.TestCase):
         )[0]
         self.assertEqual(len(record["title"]), 500)
         self.assertIsNone(record["canonical_url"])
+        long_url = "https://example.com/" + "x" * 2100
+        self.assertIsNone(parse_json(json.dumps([{"url": long_url}]))[0]["canonical_url"])
+
+    def test_malformed_json_ld_fails_clearly(self):
+        with self.assertRaisesRegex(ListingError, "malformed JSON-LD"):
+            parse_html('<script type="application/ld+json">{</script>')
+
+    def test_url_canonicalization_handles_ipv6_hosts(self):
+        record = parse_json('[{"url":"https://[2001:db8::1]:443/job#details"}]')[0]
+        self.assertEqual(record["canonical_url"], "https://[2001:db8::1]/job")
 
     def test_bundle_is_versioned_bounded_json_in_explicit_external_directory(self):
         records = process_input((FIXTURES / "listings.json").read_text(), "json")
