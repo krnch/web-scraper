@@ -31,8 +31,8 @@ ALIASES = {
 TRACKING_PARAMETERS = {
     "fbclid",
     "gclid",
-    "ref",
-    "source",
+    "mc_cid",
+    "mc_eid",
 }
 REPOSITORY_ROOT = next(
     (parent for parent in Path(__file__).resolve().parents if (parent / ".git").exists()),

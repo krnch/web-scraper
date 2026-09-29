@@ -99,6 +99,15 @@ class PipelineTests(unittest.TestCase):
         record = parse_json('[{"url":"https://[2001:db8::1]:443/job#details"}]')[0]
         self.assertEqual(record["canonical_url"], "https://[2001:db8::1]/job")
 
+    def test_url_canonicalization_preserves_non_tracking_query_parameters(self):
+        record = parse_json(
+            '[{"url":"https://jobs.example/role?source=remote&ref=engineering"}]'
+        )[0]
+        self.assertEqual(
+            record["canonical_url"],
+            "https://jobs.example/role?ref=engineering&source=remote",
+        )
+
     def test_bundle_is_versioned_bounded_json_in_explicit_external_directory(self):
         records = process_input((FIXTURES / "listings.json").read_text(), "json")
         with tempfile.TemporaryDirectory() as directory:
