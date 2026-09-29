@@ -2,7 +2,7 @@
 
 Updated September 29, 2026.
 
-**Stage: documentation-only; no collection or job-search automation is running.**
+**Stage: offline parser implemented; no collection or job-search automation is running.**
 
 ## Repository setup
 
@@ -15,8 +15,8 @@ Verified September 29, 2026, 22:11 UTC: public visibility, `main` branch, five a
 ## Implementation remaining
 
 - [ ] Choose license and review provenance before copying existing code.
-- [ ] Implement fixture parsing, normalized listing schema, deduplication and filters.
-- [ ] Add offline tests for malformed pages, duplicates and privacy-sensitive fields.
+- [x] Implement fixture parsing, normalized listing schema, deduplication and filters.
+- [x] Add offline tests for malformed inputs, duplicates and allowlisted fields.
 - [ ] Approve one real source's access, rate and redistribution rules.
 - [ ] Enforce network/redirect/response/page/time caps and stop-on-block behavior.
 - [ ] Review and approve a bounded manual development workflow; no personal data or scheduled application loop.
