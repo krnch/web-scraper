@@ -4,6 +4,8 @@ A reusable toolkit for offline listing parsing, deduplication and normalization.
 
 The first release is an offline-only parser and does not fetch pages, use models, or run scheduled collection.
 
+A pluggable permitted-source adapter contract is included for W2 implementation work. It only supports approved source IDs (no arbitrary user-submitted URLs), enforces HTTPS plus host allowlists, revalidates redirects, blocks private/link-local/loopback address resolution, and applies bounded timeout/response-size/pagination/retry limits.
+
 ## Install and run
 
 Requires Python 3.10 or later.
