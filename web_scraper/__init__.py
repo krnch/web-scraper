@@ -1,3 +1,4 @@
+from .consumer import LocalConsumer
 from .pipeline import (
     ListingError,
     apply_filters,
@@ -11,6 +12,7 @@ from .pipeline import (
 
 __all__ = [
     "ListingError",
+    "LocalConsumer",
     "apply_filters",
     "deduplicate",
     "normalize_record",
