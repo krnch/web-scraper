@@ -1,0 +1,28 @@
+{
+  "jobs": [
+    {
+      "source": "Synthetic Board",
+      "id": "eng-1",
+      "title": "  Senior   Engineer ",
+      "company": "Example Co",
+      "location": "Remote",
+      "url": "HTTPS://Jobs.Example/jobs/eng-1/?utm_source=fixture",
+      "observed_at": "2026-09-29T12:00:00Z",
+      "private_note": "must not appear in the normalized record"
+    },
+    {
+      "source": "Synthetic Board",
+      "id": "eng-2",
+      "title": "Senior Engineer",
+      "company": "Example Co",
+      "location": "Remote",
+      "url": "https://jobs.example/jobs/eng-2"
+    },
+    {
+      "source": "Synthetic Board",
+      "id": "eng-1-copy",
+      "title": "Renamed listing",
+      "url": "https://jobs.example/jobs/eng-1?utm_campaign=feed"
+    }
+  ]
+}
