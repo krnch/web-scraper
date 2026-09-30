@@ -31,6 +31,10 @@ The CLI requires an explicit `--output-dir`, rejects traversal and symbolic-link
 
 This is not a CAPTCHA/login bypass tool, an automatic application service or an unlimited hosted scraping backend. Live collection requires a separate source-approval and safety review.
 
+## Permitted sources
+
+The `web_scraper.source` contract is intentionally separate from the offline CLI. `SourcePolicy` requires an exact HTTPS host allowlist, rejects credentials and private/link-local/loopback destinations (including DNS resolutions), revalidates every redirect, and bounds response size, retries, pagination and backoff. Use `PermittedSource` with a reviewed adapter and a mock transport in tests; it does not accept arbitrary issue-submitted URLs or provide proxy, login, CAPTCHA or paywall bypasses.
+
 ## Documentation
 
 - [Plan and compute constraints](PLAN.md)

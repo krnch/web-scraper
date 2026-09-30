@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from web_scraper.cli import main
@@ -15,6 +16,7 @@ from web_scraper.pipeline import (
     process_input,
     write_bundle,
 )
+from web_scraper.source import PermittedSource, SourceError, SourcePolicy, SourceResponse
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -134,6 +136,79 @@ class PipelineTests(unittest.TestCase):
             bundle = json.loads((output_path / "listings-v1.json").read_text(encoding="utf-8"))
         self.assertEqual(result, 0)
         self.assertEqual(bundle["records"][0]["title"], "Offline role")
+
+
+class SourceTests(unittest.TestCase):
+    def setUp(self):
+        self.policy = SourcePolicy(
+            frozenset({"approved.example"}),
+            max_response_bytes=8,
+            max_pages=2,
+            max_retries=1,
+        )
+
+    @staticmethod
+    def response(status=200, body=b"ok", location=None):
+        headers = {} if location is None else {"Location": location}
+        return SourceResponse(status, headers, body, "")
+
+    def test_https_allowlist_and_private_address_guard_run_before_transport(self):
+        transport = unittest.mock.Mock()
+        source = PermittedSource(self.policy, transport=transport)
+        with self.assertRaisesRegex(SourceError, "HTTPS"):
+            source.fetch("http://approved.example/jobs")
+        for blocked in ("127.0.0.1", "10.0.0.1", "169.254.1.1"):
+            with self.assertRaisesRegex(SourceError, "not permitted|private"):
+                source.fetch(f"https://{blocked}/jobs")
+        transport.assert_not_called()
+
+    @patch("web_scraper.source._host_is_public", return_value=True)
+    def test_redirect_destination_is_revalidated(self, _public):
+        responses = iter(
+            [
+                self.response(302, location="https://evil.example/jobs"),
+            ]
+        )
+        source = PermittedSource(self.policy, transport=lambda request, timeout: next(responses))
+        with self.assertRaisesRegex(SourceError, "not permitted"):
+            source.fetch("https://approved.example/jobs")
+
+    @patch("web_scraper.source._host_is_public", return_value=True)
+    def test_response_size_is_bounded(self, _public):
+        source = PermittedSource(
+            self.policy,
+            transport=lambda request, timeout: self.response(body=b"012345678"),
+        )
+        with self.assertRaisesRegex(SourceError, "8-byte"):
+            source.fetch("https://approved.example/jobs")
+
+    @patch("web_scraper.source._host_is_public", return_value=True)
+    def test_pagination_and_retry_are_bounded(self, _public):
+        calls = []
+        responses = iter([self.response(503), self.response(body=b"page")])
+        source = PermittedSource(
+            self.policy,
+            transport=lambda request, timeout: (calls.append(request.full_url), next(responses))[1],
+            sleep=lambda delay: calls.append(delay),
+        )
+        pages = source.fetch_pages(
+            "https://approved.example/jobs",
+            lambda response: "https://approved.example/jobs?page=2" if len(calls) == 2 else None,
+        )
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(calls[1], 0.25)
+
+    @patch("web_scraper.source._host_is_public", return_value=True)
+    def test_pagination_limit_is_enforced(self, _public):
+        source = PermittedSource(
+            self.policy,
+            transport=lambda request, timeout: self.response(body=b"page"),
+        )
+        with self.assertRaisesRegex(SourceError, "2-page"):
+            source.fetch_pages(
+                "https://approved.example/jobs",
+                lambda response: "https://approved.example/jobs?page=next",
+            )
 
 
 if __name__ == "__main__":
