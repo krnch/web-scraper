@@ -5,6 +5,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from web_scraper.cli import main
+from web_scraper.consumer import LocalConsumer
 from web_scraper.pipeline import (
     MAX_INPUT_BYTES,
     ListingError,
@@ -30,6 +31,14 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(records[0]["canonical_url"], "https://jobs.example/jobs/eng-1")
         self.assertNotIn("private_note", records[0])
         self.assertNotIn("description", records[0])
+
+    def test_descriptions_require_explicit_permission(self):
+        text = '[{"id":"job-1","description":"Permitted fixture description"}]'
+        self.assertNotIn("description", parse_json(text)[0])
+        self.assertEqual(
+            parse_json(text, include_description=True)[0]["description"],
+            "Permitted fixture description",
+        )
 
     def test_same_title_does_not_deduplicate_distinct_jobs(self):
         records = parse_json(
@@ -119,6 +128,49 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(bundle["record_count"], len(bundle["records"]))
         self.assertEqual(destination.name, "listings-v1.json")
 
+    def test_manifest_contains_contract_metadata_and_content_fingerprint(self):
+        content = (FIXTURES / "listings.json").read_text(encoding="utf-8")
+        records = process_input(content, "json", source="fixture-board")
+        bundle = create_bundle(
+            records,
+            task_id="task-1",
+            source_adapter_version="fixture-2",
+            observed_at="2026-09-30T00:00:00Z",
+            provenance={"source": "fixture-board", "license": "test"},
+            content=content,
+        )
+        manifest = bundle["manifest"]
+        self.assertEqual(manifest["task_id"], "task-1")
+        self.assertEqual(manifest["source_adapter_version"], "fixture-2")
+        self.assertEqual(manifest["core_version"], "0.1.0")
+        self.assertEqual(manifest["content_size"], len(content.encode("utf-8")))
+        self.assertEqual(manifest["record_count"], bundle["record_count"])
+        self.assertEqual(bundle["generated_at"], manifest["observed_at"])
+
+    def test_private_consumer_is_idempotent_and_preserves_human_decisions(self):
+        records = parse_json(
+            '[{"id":"job-1","title":"Engineer","datePosted":"2026-09-01",'
+            '"validThrough":"2026-10-01"}]',
+            source="fixture-board",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            consumer = LocalConsumer(Path(directory) / "private-state.sqlite")
+            bundle = create_bundle(records, observed_at="2026-09-30T00:00:00Z")
+            self.assertEqual(consumer.import_bundle(bundle), {"imported": 1, "updated": 0})
+            consumer.set_human_decision("source:fixture-board:job-1", "review")
+            updated = parse_json(
+                '[{"id":"job-1","title":"Updated Engineer"}]', source="fixture-board"
+            )
+            result = consumer.import_bundle(
+                create_bundle(updated, observed_at="2026-09-30T01:00:00Z")
+            )
+            self.assertEqual(result, {"imported": 0, "updated": 1})
+            state = consumer.get("source:fixture-board:job-1")
+        self.assertEqual(state["human_decision"], "review")
+        self.assertEqual(state["record"]["title"], "Updated Engineer")
+        self.assertEqual(state["first_seen_at"], "2026-09-30T00:00:00Z")
+        self.assertEqual(state["last_seen_at"], "2026-09-30T01:00:00Z")
+
     def test_unsafe_output_paths_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ListingError, "path traversal"):
@@ -132,10 +184,22 @@ class PipelineTests(unittest.TestCase):
             input_path = root / "listings.json"
             output_path = root / "bundle"
             input_path.write_text('[{"title":"Offline role","id":"local-1"}]', encoding="utf-8")
-            result = main(["--input", str(input_path), "--output-dir", str(output_path)])
+            result = main(
+                [
+                    "--input",
+                    str(input_path),
+                    "--output-dir",
+                    str(output_path),
+                    "--task-id",
+                    "fixture-task",
+                    "--source-adapter-version",
+                    "fixture-1",
+                ]
+            )
             bundle = json.loads((output_path / "listings-v1.json").read_text(encoding="utf-8"))
         self.assertEqual(result, 0)
         self.assertEqual(bundle["records"][0]["title"], "Offline role")
+        self.assertEqual(bundle["manifest"]["task_id"], "fixture-task")
 
 
 class SourceTests(unittest.TestCase):

@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -18,6 +19,8 @@ MAX_FIELD_LENGTHS = {
     "observed_at": 100,
 }
 SCHEMA_VERSION = "1.0"
+CORE_VERSION = "0.1.0"
+MAX_FIELD_LENGTHS.update({"posting_date": 100, "expiry_date": 100})
 FIELDS = frozenset(MAX_FIELD_LENGTHS)
 ALIASES = {
     "source": ("source", "provider", "site"),
@@ -27,6 +30,8 @@ ALIASES = {
     "location": ("location", "job_location", "jobLocation"),
     "canonical_url": ("canonical_url", "url", "apply_url", "applyUrl"),
     "observed_at": ("observed_at", "observedAt", "date_posted", "datePosted"),
+    "posting_date": ("posting_date", "postingDate", "date_posted", "datePosted"),
+    "expiry_date": ("expiry_date", "expiryDate", "valid_through", "validThrough"),
 }
 TRACKING_PARAMETERS = {
     "fbclid",
@@ -112,7 +117,7 @@ def canonicalize_url(value):
         return None
 
 
-def normalize_record(record, source="unknown"):
+def normalize_record(record, source="unknown", include_description=False):
     if not isinstance(record, dict):
         raise ListingError("each listing must be a JSON object")
 
@@ -127,6 +132,8 @@ def normalize_record(record, source="unknown"):
         else:
             value = _text(value, MAX_FIELD_LENGTHS[field])
         normalized[field] = value
+    if include_description:
+        normalized["description"] = _text(record.get("description"), 5000)
     return normalized
 
 
@@ -151,13 +158,16 @@ def _records_from_json(value):
     return records
 
 
-def parse_json(text, source="unknown"):
+def parse_json(text, source="unknown", include_description=False):
     _check_text_size(text)
     try:
         payload = json.loads(text)
     except (json.JSONDecodeError, RecursionError) as exc:
         raise ListingError(f"malformed JSON input: {exc}") from exc
-    return [normalize_record(item, source=source) for item in _records_from_json(payload)]
+    return [
+        normalize_record(item, source=source, include_description=include_description)
+        for item in _records_from_json(payload)
+    ]
 
 
 class _OfflineHTMLParser(HTMLParser):
@@ -212,7 +222,7 @@ def _job_postings(value):
             yield from _job_postings(graph)
 
 
-def parse_html(text, source="unknown"):
+def parse_html(text, source="unknown", include_description=False):
     _check_text_size(text)
     parser = _OfflineHTMLParser()
     try:
@@ -231,7 +241,10 @@ def parse_html(text, source="unknown"):
             records.append(record)
             if len(records) > MAX_RECORDS:
                 raise ListingError(f"input exceeds the {MAX_RECORDS}-record batch limit")
-    return [normalize_record(item, source=source) for item in records]
+    return [
+        normalize_record(item, source=source, include_description=include_description)
+        for item in records
+    ]
 
 
 def _check_text_size(text):
@@ -318,25 +331,62 @@ def apply_filters(records, filters=None):
     return selected
 
 
-def process_input(text, input_format, source="unknown", filters=None):
+def process_input(
+    text, input_format, source="unknown", filters=None, include_description=False
+):
     if input_format == "json":
-        records = parse_json(text, source=source)
+        records = parse_json(text, source=source, include_description=include_description)
     elif input_format == "html":
-        records = parse_html(text, source=source)
+        records = parse_html(text, source=source, include_description=include_description)
     else:
         raise ListingError("input format must be 'html' or 'json'")
     return apply_filters(deduplicate(records), filters)
 
 
-def create_bundle(records):
+def create_bundle(
+    records,
+    *,
+    task_id="local",
+    source_adapter_version="unknown",
+    observed_at=None,
+    provenance=None,
+    content=None,
+    include_description=False,
+):
     if len(records) > MAX_RECORDS:
         raise ListingError(f"bundle exceeds the {MAX_RECORDS}-record limit")
-    records = deduplicate([normalize_record(record) for record in records])
+    records = deduplicate(
+        [
+            normalize_record(
+                record, include_description=include_description
+            )
+            for record in records
+        ]
+    )
+    if content is not None:
+        _check_text_size(content)
+        content_bytes = content.encode("utf-8")
+        content_hash = hashlib.sha256(content_bytes).hexdigest()
+        content_size = len(content_bytes)
+    else:
+        content_hash = None
+        content_size = None
+    observed_at = observed_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     return {
         "schema_version": SCHEMA_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at": observed_at,
         "record_count": len(records),
         "records": records,
+        "manifest": {
+            "task_id": _text(task_id, 256),
+            "source_adapter_version": _text(source_adapter_version, 100),
+            "core_version": CORE_VERSION,
+            "observed_at": observed_at,
+            "provenance": provenance or {},
+            "content_sha256": content_hash,
+            "content_size": content_size,
+            "record_count": len(records),
+        },
     }
 
 
@@ -368,7 +418,15 @@ def write_bundle(bundle, output_dir):
     directory = _safe_output_directory(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
     destination = directory / "listings-v1.json"
-    safe_bundle = create_bundle(records)
+    safe_bundle = create_bundle(
+        records, include_description=any("description" in record for record in records)
+    )
+    if isinstance(bundle.get("manifest"), dict):
+        safe_bundle["manifest"].update(bundle["manifest"])
+        safe_bundle["manifest"]["record_count"] = safe_bundle["record_count"]
+        safe_bundle["generated_at"] = safe_bundle["manifest"].get(
+            "observed_at", safe_bundle["generated_at"]
+        )
     encoded = (json.dumps(safe_bundle, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     temporary_path = None
     try:

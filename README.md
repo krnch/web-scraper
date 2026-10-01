@@ -15,7 +15,11 @@ web-scraper --input ./synthetic-jobs.json --output-dir /tmp/listings
 
 `--input` accepts local `.json`, `.html`, or `.htm` files (otherwise inferred from content). JSON can be a listing object, an array, or an object containing a `records`, `listings`, `jobs`, or `data` array. HTML extraction supports Schema.org `JobPosting` JSON-LD and JSON in `data-job`/`data-listing` attributes. Input is capped at 1 MB and 100 records per batch.
 
-The normalized schema is versioned and includes only `source`, `identifier`, `title`, `company`, `location`, `canonical_url`, and `observed_at`. Missing fields are `null`; extra fields are discarded. URLs are canonicalized by lowercasing the host, removing fragments and common tracking parameters, and sorting remaining query parameters. Records deduplicate by canonical URL or by source plus identifier, never by title alone.
+The normalized listing schema is versioned and includes `source`, `identifier`, `title`, `company`, `location`, `canonical_url`, `observed_at`, `posting_date`, and `expiry_date`. Missing fields are `null`; extra fields are discarded. Descriptions are excluded unless `--include-descriptions` is explicitly used for a permitted source. URLs are canonicalized by lowercasing the host, removing fragments and common tracking parameters, and sorting remaining query parameters. Records deduplicate by canonical URL or by source plus identifier, never by title alone.
+
+Each bundle also contains a manifest with the task ID, source-adapter and core versions, observation time, provenance, source content SHA-256/byte size, and record count. The CLI hashes the local fixture input and writes this metadata alongside the records.
+
+`LocalConsumer` is an optional private SQLite consumer. It keys records by canonical URL or source plus job identifier, updates `last_seen_at` on re-import, and leaves an existing `human_decision` unchanged. It stores listing state only; resumes, personal ranking, and application records are intentionally not part of the public bundle or consumer schema.
 
 Filters are optional JSON in `--filters`; supported keys are `include` (exact match), `contains`, `exclude_contains`, and `require`. The first three map normalized field names to a value or list of values. For example:
 

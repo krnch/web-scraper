@@ -42,15 +42,40 @@ def main(argv=None):
     parser.add_argument("--input", required=True, help="local synthetic HTML or JSON file")
     parser.add_argument("--output-dir", required=True, help="explicit directory outside this Git worktree")
     parser.add_argument("--source", default="unknown", help="fallback source name for records")
+    parser.add_argument("--task-id", default="local", help="collection task identifier")
+    parser.add_argument(
+        "--source-adapter-version", default="unknown", help="source adapter contract version"
+    )
     parser.add_argument("--filters", help="optional local JSON filter configuration")
+    parser.add_argument(
+        "--include-descriptions",
+        action="store_true",
+        help="include descriptions only when the source permits redistribution",
+    )
     args = parser.parse_args(argv)
 
     try:
         text = _read_limited(args.input)
         input_format = _format_for(args.input, text)
         filters = json.loads(_read_limited(args.filters)) if args.filters else None
-        records = process_input(text, input_format, source=args.source, filters=filters)
-        destination = write_bundle(create_bundle(records), args.output_dir)
+        records = process_input(
+            text,
+            input_format,
+            source=args.source,
+            filters=filters,
+            include_description=args.include_descriptions,
+        )
+        destination = write_bundle(
+            create_bundle(
+                records,
+                task_id=args.task_id,
+                source_adapter_version=args.source_adapter_version,
+                provenance={"source": args.source},
+                content=text,
+                include_description=args.include_descriptions,
+            ),
+            args.output_dir,
+        )
     except (ListingError, json.JSONDecodeError, OSError) as exc:
         print(f"web-scraper: {exc}", file=sys.stderr)
         return 2
