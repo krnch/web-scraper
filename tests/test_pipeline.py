@@ -10,6 +10,7 @@ from web_scraper.pipeline import (
     ListingError,
     apply_filters,
     create_bundle,
+    collect_from_source,
     deduplicate,
     parse_html,
     parse_json,
@@ -109,6 +110,20 @@ class PipelineTests(unittest.TestCase):
             record["canonical_url"],
             "https://jobs.example/role?ref=engineering&source=remote",
         )
+
+
+    def test_collect_from_source_uses_policy_and_parses_pages(self):
+        class StubAdapter:
+            def fetch_pages(self, policy):
+                self.policy = policy
+                yield '[{"url":"https://jobs.example/one","title":"One"}]', "json"
+                yield '[{"url":"https://jobs.example/one","title":"One duplicate"}]', "json"
+
+        adapter = StubAdapter()
+        records = collect_from_source("synthetic-board", adapter)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["source"], "synthetic-board")
+        self.assertEqual(records[0]["title"], "One")
 
     def test_bundle_is_versioned_bounded_json_in_explicit_external_directory(self):
         records = process_input((FIXTURES / "listings.json").read_text(), "json")

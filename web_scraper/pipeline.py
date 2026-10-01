@@ -328,6 +328,30 @@ def process_input(text, input_format, source="unknown", filters=None):
     return apply_filters(deduplicate(records), filters)
 
 
+def collect_from_source(source_id, adapter, filters=None):
+    from .source_adapter import SourceError
+    from .sources import get_source_policy
+
+    try:
+        policy = get_source_policy(source_id)
+    except ValueError as exc:
+        raise ListingError(str(exc)) from exc
+
+    try:
+        records = []
+        for text, input_format in adapter.fetch_pages(policy):
+            if input_format == "json":
+                page_records = parse_json(text, source=policy.source_name)
+            elif input_format == "html":
+                page_records = parse_html(text, source=policy.source_name)
+            else:
+                raise ListingError("source adapter page format must be 'html' or 'json'")
+            records.extend(page_records)
+        return apply_filters(deduplicate(records), filters)
+    except SourceError as exc:
+        raise ListingError(str(exc)) from exc
+
+
 def create_bundle(records):
     if len(records) > MAX_RECORDS:
         raise ListingError(f"bundle exceeds the {MAX_RECORDS}-record limit")
